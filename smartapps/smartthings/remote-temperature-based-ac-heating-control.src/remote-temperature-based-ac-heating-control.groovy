@@ -38,6 +38,14 @@ preferences() {
 	section("Optionally choose temperature sensor to use instead of the thermostat's... ") {
 		input "sensor", "capability.temperatureMeasurement", title: "Temp Sensors", required: false
 	}
+    section("Special Temperature Time") {
+        input "fromTime", "time", title: "From", required: true
+        input "toTime", "time", title: "To", required: true
+    }
+    section("Enable Away mode offset?") {
+        input "enAway", "bool", required: true,
+              title: "Enable Away mode offset?"
+    }
     section("Send Push Notification?") {
         input "sendPush", "bool", required: true,
               title: "Send Push Notification when mode changed?"
@@ -86,13 +94,23 @@ private evaluate()
 		def tm = thermostat.currentThermostatMode
 		def ct = thermostat.currentTemperature
 		def currentTemp = sensor.currentTemperature
-      
+        def offset=0
+        def between = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
+    	if (between) {
+        		offset=1
+    	} else {
+        		offset=0
+    	}
         
+        if (enAway && location.currentMode=="Away"){
+         	offset=(10)
+         }
+       	 
         ct = 72
         if (tm in ["cool","auto"]) {
         	// send 68F as setpoint if the temperature is above setpoint+deadband AND the system is not "cooling" already
         	//if (currentTemp - coolingSetpoint >= threshold) {
-            if (currentTemp - coolingSetpoint >= threshold) {
+            if (currentTemp - (coolingSetpoint+offset) >= threshold) {
         		thermostat.setCoolingSetpoint(68)
             	log.trace("AC turned ON - Current Temperature $currentTemp °F")
                 if ((!(thermostat.thermostatOperatingState in ["cooling"])) && sendPush){
@@ -100,7 +118,7 @@ private evaluate()
                 }
                
         	}
-        	else if(coolingSetpoint - currentTemp >= threshold){
+        	else if(coolingSetpoint - (coolingSetpoint+offset) >= threshold){
         		thermostat.setCoolingSetpoint(84)
             	log.trace("AC turned OFF - Current Temperature $currentTemp °F")
                 if (thermostat.thermostatOperatingState in ["cooling"]){
@@ -113,10 +131,9 @@ private evaluate()
                 }
         	}
         }
-        if (tm in ["heat","emergency heat","auto"]) {
-         def err= (currentTemp - heatingSetpoint)
-         log.trace("evaluate:, error -- $err")
-       	 if (currentTemp - heatingSetpoint >= threshold) {
+        if (tm in ["heat","emergency heat"]) {
+        
+         if (currentTemp - (heatingSetpoint-offset) >= threshold) {
         	thermostat.setHeatingSetpoint(62)
             log.trace("Heat turned OFF - Current Temperature $currentTemp, F")
             if(sendPush){
