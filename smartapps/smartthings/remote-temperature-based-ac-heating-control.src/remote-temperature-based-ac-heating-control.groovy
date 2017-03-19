@@ -112,7 +112,7 @@ private evaluate()
         	//if (currentTemp - coolingSetpoint >= threshold) {
             if (currentTemp - (coolingSetpoint+offset) >= threshold) {
         		thermostat.setCoolingSetpoint(68)
-            	log.trace("AC turned ON - Current Temperature $currentTemp °F")
+            	log.trace("AC turned ON - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
                 if ((!(thermostat.thermostatOperatingState in ["cooling"])) && sendPush){
                 	sendNotificationEvent("RemoStat - AC turned ON . Current Temperature $currentTemp °F")
                 }
@@ -120,7 +120,7 @@ private evaluate()
         	}
         	else if(coolingSetpoint - (coolingSetpoint+offset) >= threshold){
         		thermostat.setCoolingSetpoint(84)
-            	log.trace("AC turned OFF - Current Temperature $currentTemp °F")
+            	log.trace("AC turned OFF -  - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
                 if (thermostat.thermostatOperatingState in ["cooling"]){
                 	if(sendPush){
                     	sendNotificationEvent("RemoStat - AC turned OFF . Current Temperature $currentTemp  °F")
@@ -132,19 +132,20 @@ private evaluate()
         	}
         }
         if (tm in ["heat","emergency heat"]) {
-        
+         log.trace("Current Location mode: $location.currentMode")
          if (currentTemp - (heatingSetpoint-offset) >= threshold) {
         	thermostat.setHeatingSetpoint(62)
-            log.trace("Heat turned OFF - Current Temperature $currentTemp, F")
+            log.trace("Heat turned OFF - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
+           
             if(sendPush){
-                    	sendNotificationEvent("RemoStat - Heat turned OFF . Current Temperature $currentTemp, F")
+                    	sendNotificationEvent("RemoStat - Heat turned OFF . Current Temperature $currentTemp, °F")
             }
        	 }
        	 else {
         	thermostat.setHeatingSetpoint(72)
-            log.trace("Heat turned ON - Current Temperature $currentTemp, F")
+            log.trace("Heat turned ON - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
             if(sendPush){
-                    	sendNotificationEvent("RemoStat - Heat turned ON . Current Temperature $currentTemp, F")
+                    	sendNotificationEvent("RemoStat - Heat turned ON . Current Temperature $currentTemp, °F")
             }
        	 }
         }
