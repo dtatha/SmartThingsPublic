@@ -46,6 +46,10 @@ preferences {
 	section("Select 'heat' for a heater and 'cool' for an air conditioner..."){
 		input "mode", "enum", title: "Heating or cooling?", options: ["heat","cool"]
 	}
+    section("Send Push Notification?") {
+        input "sendPush", "bool", required: false,
+              title: "Send Push Notification when Opened?"
+    }
 }
 
 def installed()
@@ -106,9 +110,15 @@ private evaluate(currentTemp, desiredTemp)
 		// air conditioner
 		if (currentTemp - desiredTemp >= threshold) {
 			outlets.on()
+            if (sendPush) {
+        	sendPush("The temperature reached ${currentTemp} F. I turned on AC!")
+    		}
 		}
 		else if (desiredTemp - currentTemp >= threshold) {
 			outlets.off()
+            if (sendPush) {
+        	sendPush("The temperature reached ${currentTemp} F. I turned off AC!")
+    		}
 		}
 	}
 	else {
