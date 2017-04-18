@@ -118,7 +118,7 @@ private evaluate()
                 }
                
         	}
-        	else if(coolingSetpoint - (coolingSetpoint+offset) >= threshold){
+        	else {
         		thermostat.setCoolingSetpoint(84)
             	log.trace("AC turned OFF -  - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
                 if (thermostat.thermostatOperatingState in ["cooling"]){
