@@ -36,9 +36,21 @@ preferences() {
 		input "coolingSetpoint", "decimal", title: "Degrees F"
 	}
 	section("Optionally choose temperature sensor to use instead of the thermostat's... ") {
-		input "sensor", "capability.temperatureMeasurement", title: "Temp Sensors", required: false
+		input "sensor", "capability.temperatureMeasurement", title: "Temp Sensors", required: true
 	}
-    section("Special Temperature Time") {
+    section("Select the ceiling fan control hardware..."){
+			input "fanDimmer", "capability.switchLevel", 
+	    	multiple:false, title: "Fan Control device", required: false
+	}
+    /*section("Enable Adaptive Fan Speed Control?") {
+        input "enFanSpeed", "bool", required: false,
+              title: "Enable Adaptive Fan Speed Control?"
+    }*/
+    section("Enable Adaptive Fan Control"){
+			input "adapFanSwitch", "capability.switch", 
+	    	multiple:false, title: "Enable Adaptive Fan Speed Control?", required: false
+	}
+    section("Disable Away mode offset between") {
         input "fromTime", "time", title: "From", required: true
         input "toTime", "time", title: "To", required: true
     }
@@ -50,6 +62,11 @@ preferences() {
         input "sendPush", "bool", required: true,
               title: "Send Push Notification when mode changed?"
     }
+/*    section("Sleep Cycle on between what times?") {
+        input "fromTime", "time", title: "From", required: true
+        input "toTime", "time", title: "To", required: true
+    }
+ */
 }
 
 def installed()
@@ -96,20 +113,22 @@ private evaluate()
 		def currentTemp = sensor.currentTemperature
         def offset=0
         def between = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
-    	if (between) {
-        		offset=1
-    	} else {
-        		offset=0
-    	}
-        
-        if (enAway && location.currentMode=="Away"){
+    	def adaptiveFan = adapFanSwitch.currentSwitch
+        def sleepBetween = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
+            
+        if (enAway && location.currentMode=="Away" && !between){
          	offset=(10)
          }
-       	 
         ct = 72
         if (tm in ["cool","auto"]) {
         	// send 68F as setpoint if the temperature is above setpoint+deadband AND the system is not "cooling" already
         	//if (currentTemp - coolingSetpoint >= threshold) {
+           /* 
+           if (sleepBetween){
+            	offset= (-4)*TimeCategory.minus(new Date(),fromTime)/TimeCategory.minus(toTime,fromTime)
+            	log.trace("Offset $offset °F")
+            }
+           */
             if (currentTemp - (coolingSetpoint+offset) >= threshold) {
         		thermostat.setCoolingSetpoint(68)
             	log.trace("AC turned ON - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
@@ -121,28 +140,39 @@ private evaluate()
         	else {
         		thermostat.setCoolingSetpoint(84)
             	log.trace("AC turned OFF -  - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
-                if (thermostat.thermostatOperatingState in ["cooling"]){
-                	if(sendPush){
-                    	sendNotificationEvent("RemoStat - AC turned OFF . Current Temperature $currentTemp  °F")
-                    }
-                }
-                else{
-                	// do not send notification
-                }
+                if (thermostat.thermostatOperatingState in ["cooling"] && sendPush){
+                	sendNotificationEvent("RemoStat - AC turned OFF . Current Temperature $currentTemp  °F")
+             	}
         	}
-        }
+         }
         if (tm in ["heat","emergency heat"]) {
-         log.trace("Current Location mode: $location.currentMode")
          if (currentTemp - (heatingSetpoint-offset) >= threshold) {
         	thermostat.setHeatingSetpoint(62)
+            if(fanDimmer){
+            	//fanDimmer.on()
+                log.trace("Entering Adaptive Fan Control decision loop- Adaptive Fan Control Setting $enFanSpeed, Adaptive Fan Control Switch $adaptiveFan")
+            	if(adaptiveFan=="on"){
+                			log.trace("Entering Adaptive Fan Control - Adaptive Fan Control Setting $enFanSpeed, Adaptive Fan Control Switch $adaptiveFan")
+                	    	fanDimmer.setLevel(0)
+                            fanDimmer.off()
+                }
+            }
             log.trace("Heat turned OFF - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
-           
             if(sendPush){
                     	sendNotificationEvent("RemoStat - Heat turned OFF . Current Temperature $currentTemp, °F")
             }
        	 }
        	 else {
-        	thermostat.setHeatingSetpoint(72)
+        	thermostat.setHeatingSetpoint(76)
+            if(fanDimmer){
+            	//fanDimmer.on()
+                log.trace("Entering Adaptive Fan Control decision loop- Adaptive Fan Control Setting $enFanSpeed, Adaptive Fan Control Switch $adaptiveFan")
+            	if (adaptiveFan=="on"){
+                	log.trace("Entering Adaptive Fan Control - Adaptive Fan Control Setting $enFanSpeed, Adaptive Fan Control Switch $adaptiveFan")
+                	fanDimmer.on()
+                    fanDimmer.setLevel(33)
+                }
+            }
             log.trace("Heat turned ON - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
             if(sendPush){
                     	sendNotificationEvent("RemoStat - Heat turned ON . Current Temperature $currentTemp, °F")
@@ -155,8 +185,8 @@ private evaluate()
 		thermostat.setCoolingSetpoint(coolingSetpoint)
 		thermostat.poll()
 	}
-    
-}
+}    
+
 
 // for backward compatibility with existing subscriptions
 def coolingSetpointHandler(evt) {

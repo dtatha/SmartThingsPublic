@@ -4,6 +4,7 @@
  *  Author: Schwark Satyavolu
  *
  */
+
 definition(
     name: "Alarm.com",
     namespace: "schwark",
@@ -13,12 +14,13 @@ definition(
     iconUrl: "https://images-na.ssl-images-amazon.com/images/I/71yQ11GAAiL.png",
     iconX2Url: "https://images-na.ssl-images-amazon.com/images/I/71yQ11GAAiL.png",
     singleInstance: true
-)
+) 
 
 preferences {
 	input("username", "string", title:"Username", description: "Please enter your Alarm.com username", required: true, displayDuringSetup: true)
 	input("password", "password", title:"Password", description: "Please enter your Alarm.com password", required: true, displayDuringSetup: true)
 	input("disarm", "bool", title:"Add Disarm Switch as well", description: "Disarm button is only added if this is set to on", required: false, displayDuringSetup: true, defaultValue: false )
+
 }
 
 /////////////////////////////////////
@@ -56,11 +58,28 @@ def getHubId() {
 
 /////////////////////////////////////
 def locationHandler(evt) {
-	log.debug "$locationHandler(evt.description)"
+	//log.debug "$locationHandler(evt.description)"
 	def description = evt.description
 	def hub = evt?.hubId
 	state.hubId = hub
-	log.debug("location handler: event description is ${description}")
+	//log.debug("location handler: event description is ${description}")
+}
+
+def getCookieValue(browserSession, name) {
+	def value = ""
+	if(browserSession && browserSession.cookies) {
+		browserSession.cookies.each {cookie ->
+			def cookieList = cookie.split('=', 2)
+			def cookieName = cookieList[0]
+			def cookieValue = cookieList[1]
+			//log.debug("looking for ${name}: current cookie is ${cookieName} with value ${cookieValue}")
+			if(name == cookieName) {
+				value = cookieValue
+			}
+		}
+	}
+
+	return value
 }
 
 /////////////////////////////////////
@@ -73,12 +92,13 @@ private def parseEventMessage(String description) {
 }
 
 
-private def getCommand(command=null, silent=false, nodelay=false) {
+private def getCommand(command=null, silent=true, nodelay=false, bypass=false) {
+	log.debug("getCommand got command ${command} with silent ${silent} and nodelay of ${nodelay}")
 	def COMMANDS = [
-					'ARMSTAY': ['params': ['ctl00$phBody$butArmStay':'Arm Stay', 'ctl00$phBody$cbArmOptionSilent': silent?'on':'', 'ctl00$phBody$cbArmOptionNoEntryDelay': nodelay?'on':''], 'name': 'Arm Stay', button: true],
-					'ARMAWAY': ['params': ['ctl00$phBody$butArmAway':'Arm Away', 'ctl00$phBody$cbArmOptionSilent': silent?'on':'', 'ctl00$phBody$cbArmOptionNoEntryDelay': nodelay?'on':''], 'name': 'Arm Away', button: true],
-					'DISARM': ['params': ['ctl00$phBody$butDisarm':'Disarm', 'ctl00$phBody$cbArmOptionSilent': silent?'on':'', 'ctl00$phBody$cbArmOptionNoEntryDelay': nodelay?'on':''], 'name': 'Disarm', button: settings.disarm],
-					'STATUS': ['params': [], 'name': 'Status', button: false]
+					'ARMSTAY': ['params': ['command':'/armStay', 'silent': silent?'true':'false', 'nodelay': nodelay?'true':'false'], 'name': 'Arm Stay', button: true],
+					'ARMAWAY': ['params': ['command':'/armAway', 'silent': silent?'true':'false', 'nodelay': nodelay?'true':'false'], 'name': 'Arm Away', button: true],
+					'DISARM': ['params': ['command':'/disarm', 'silent': silent?'true':'false', 'nodelay': nodelay?'true':'false'], 'name': 'Disarm', button: settings.disarm],
+					'STATUS': ['params': ['command':'', 'silent': silent?'true':'false', 'nodelay': nodelay?'true':'false'], 'name': 'Status', button: false]
 				   ]
 
 	return command ? COMMANDS[command] : COMMANDS
@@ -89,33 +109,58 @@ private def toQueryString(Map m)
 	return m.collect { k, v -> "${k}=${URLEncoder.encode(v.toString())}" }.sort().join("&")
 }
 
-private def getRecipe(command, silent, nodelay) {
-	def COMMAND = getCommand(command, silent, nodelay)
+private def getRecipe(command, silent=true, nodelay=false, bypass=false) {
+	def COMMAND = getCommand(command, silent, nodelay, bypass)
+	log.debug("getRecipe got command: silent is ${silent} and nodelay is ${nodelay} and bypass is ${bypass} and command is ${command} and COMMAND is ${COMMAND} and panelid is ${state.panelid}")
+	def apiMethod = 'post'
+	def postBody = '{"forceBypass":'+bypass+',"noEntryDelay":'+nodelay+',"silentArming":'+silent+',"statePollOnly":false}'
+	if('STATUS' == command) {
+		apiMethod ='get'
+		postBody = ''
+	}
+	def urlext = (state.panelid ? state.panelid : '${dataunit}${extension}')
 	def STEPS = [
-			['name': 'initlogin', 'uri': 'https://www.alarm.com/pda/', 'state': ['pda': ~/(?ms)pda\/([^\/]+)/]],
-			['name': 'login', 'uri': 'https://www.alarm.com/pda/${pda}/default.aspx', 'method':'post', 'variables':[
+			['name': 'initlogin', 'uri': 'https://www.alarm.com/login.aspx'],
+			['name': 'login', 'uri': 'https://www.alarm.com/web/Default.aspx', 'method':'post', 'variables':[
 			  	'__VIEWSTATE':'',
 			  	'__VIEWSTATEGENERATOR':'',
 			  	'__EVENTVALIDATION':'',
-				'ctl00$ContentPlaceHolder1$txtLogin': settings.username,
-			  	'ctl00$ContentPlaceHolder1$txtPassword': settings.password,
-			  	'ctl00$ContentPlaceHolder1$btnLogin':'Login',
-			 ], 'expect': /(?ms)Send a command to your system/, 'referer': 'self', 'state': ['status': "ctl00_phBody_lblArmingState.#text"] ],
-		     ['name': command, 'uri': 'https://www.alarm.com/pda/${pda}/main.aspx', 'method':'post', 'variables': ['__VIEWSTATE':'','__VIEWSTATEENCRYPTED':'','__EVENTVALIDATION':''] + COMMAND['params'], 'expect': /(?ms)The command should take effect/]
+			  	'IsFromNewSite': '1',
+			  	'JavaScriptTest':  '1',
+			  	'ctl00$ContentPlaceHolder1$loginform$hidLoginID': '',
+				'ctl00$ContentPlaceHolder1$loginform$txtUserName': settings.username,
+			  	'ctl00$ContentPlaceHolder1$loginform$txtPassword': settings.password,
+			  	'ctl00$ContentPlaceHolder1$loginform$signInButton':'Logging In...',
+			  	'ctl00$bottom_footer3$ucCLS_ZIP$txtZip': 'Zip Code'
+			 ], 'state': ['afg':'cookie:afg'], 'nofollow': true ],
+		     //['name': 'userextract', 'requestContentType': 'application/json; charset=UTF-8', 'contentType': 'application/vnd.api+json', 'uri': 'https://www.alarm.com/web/api/systems/availableSystemItems', 'headers': ['ajaxrequestuniquekey': '${afg}'], 'body': '', 'state': ['userid': 'json:data.0.id']],
+		     //['name': 'panelextract', 'requestContentType': 'application/json; charset=UTF-8', 'contentType': 'application/vnd.api+json', 'uri': 'https://www.alarm.com/web/api/systems/systems/${userid}', 'headers': ['ajaxrequestuniquekey': '${afg}'], 'body': '', 'state': ['panelid': 'json:data.relationships.partitions.data.0.id']],
+			 ['name': 'idextract', 'uri': 'https://www.alarm.com/web/History/EventHistory.aspx', 'state': ['dataunit': 'ctl00__page_html.data-unit-id', 'extension': 'ctl00_phBody_ddlDevice.optionvalue#Panel', 'afg':'cookie:afg']],			 
+		     ['name': command, 'method': apiMethod, 'requestContentType': 'application/json; charset=UTF-8', 'contentType': 'application/vnd.api+json', 'uri': 'https://www.alarm.com/web/api/devices/partitions/'+urlext+COMMAND.params.command, 'headers': ['ajaxrequestuniquekey': '${afg}'], 'body': postBody, 'state': ['status': ~/(?ms)"state": (\d)\,/]]
 	]
+	if(state.panelid) {
+		STEPS.remove(2)
+		//STEPS.remove(2)
+	}
 	return STEPS.reverse()
 }
 
-private def updateStatus(command, status) {
-	log.debug("updating status to ${status} on command ${command}")
+private def updateStatus(command, status, browserSession=null) {
 	def on = null
-	def id = ['Armed Stay': 'ARMSTAY', 'Armed Away': 'ARMAWAY', 'Disarmed': 'DISARM']
+	def id = ['0': 'UNKNOWN', '1': 'DISARM', '2': 'ARMSTAY', '3': 'ARMAWAY']
 	if('STATUS' == command && status) {
 		on = id[status] 
 	} else {
 		on = command
 	}
-	if(on) {
+	log.debug("updating status to ${on} on command ${command}")
+
+	if(!state.panelid && browserSession && browserSession.state.dataunit && browserSession.state.extension) {
+		state.panelid = browserSession.state.dataunit+browserSession.state.extension
+		log.debug("setting panel id to ${state.panelid}")
+	}
+
+	if(on && 'STATUS' != on) {
 		def PREFIX = getPrefix()
 		def COMMANDS = getCommand()
 		COMMANDS.each { key, map ->
@@ -134,22 +179,25 @@ private def updateStatus(command, status) {
 	}
 }
 
-def runCommand(command, silent, nodelay, browserSession=[:]) {
+def runCommand(command, silent, nodelay, bypass=false, browserSession=[:]) {
 	browserSession.vars = ['__VIEWSTATEGENERATOR':'','__EVENTVALIDATION':'','__VIEWSTATE':'']
 
-	navigateUrl(getRecipe(command, silent, nodelay), browserSession)
-	updateStatus(command, (browserSession.state && browserSession.state.status) ? browserSession.state.status : null)
+	log.debug("runCommand got command ${command} with silent ${silent} and nodelay of ${nodelay} and bypass of ${bypass}")
+	def recipes = getRecipe(command, silent, nodelay, bypass)
+	navigateUrl(recipes, browserSession)
+	updateStatus(command, (browserSession.state && browserSession.state.status) ? browserSession.state.status : null, browserSession)
 
 	return browserSession
 }
 
 private def getPatternValue(html, browserSession, kind, variable, pattern=null) {
 	if(!pattern) {
-        pattern = /(?ms)name="${variable}".*?value="([^"]*)"/
+        pattern = ~/(?ms)name="${variable}".*?value="([^"]*)"/
     }
 	log.debug("looking for values with pattern ${pattern} for ${variable}")
 	def value = null
 	if(html) {
+		html = "${html}"
 		if(!browserSession[kind]) browserSession[kind] = [:]
 		def group = (html =~ pattern)
 		if(group) {
@@ -184,17 +232,41 @@ private def getIdAttr(html, id, attr) {
 	    	if(it instanceof groovy.util.slurpersupport.Node) {
 		        def attributes = it.attributes()
 		        if(attributes && attributes['id'] == id) {
-		        	if('#text' == attr) 
+		        	if(attr.startsWith('optionvalue#')) {
+			        	def text = attr.split('#')[1]
+		        		it.children.each { child ->
+			        		//log.debug("checking option with text ${child.text()} and ${child.attributes()} for ${attr} and ${id}")
+		        			if(child.name == 'OPTION' && child.text() == text) {
+				        		result = child.attributes()['value']
+		        			}
+		        		}
+		        	} else if('#text' == attr) 
 		        		result = it.text()
 		        	else {
 		        		result = attributes ? attributes[attr] : null
 		        	}
-	        	}
+
+	        	} 
 	        }
 	        return result
 	    }
 	}
     return result
+}
+
+private def getJsonValue(html, browserSession, jsonPath) {
+	def obj = html
+	if(!(obj instanceof java.util.Map)) {
+		def jsonSlurper = new groovy.json.JsonSlurper()
+		obj = jsonSlurper.parseText("${html}")		
+	}
+	def parts = jsonPath.tokenize('.')
+	parts.each { 
+		if(it.isInteger()) it = it.toInteger()
+		obj = obj[it]
+	}
+
+	return obj
 }
 
 private def extractSession(params, response, browserSession) {
@@ -206,9 +278,21 @@ private def extractSession(params, response, browserSession) {
     	params.state.each { name, pattern ->
     		if(pattern instanceof java.util.regex.Pattern) {
 		    	getPatternValue(html, browserSession, 'state', name, pattern)
+    			log.debug("state variable ${name} set to ${browserSession.state[name]} from regex ${pattern} with content ${html}")
     		} else if(pattern instanceof String) {
-		    	def parts = pattern.tokenize('.')
-		    	browserSession.state[name] = parts.size() == 2 ? getIdAttr(html, parts[0], parts[1]) : null
+    			if(pattern.startsWith('cookie:')) {
+    				def cookieName = pattern.minus('cookie:')
+    				browserSession.state[name] = getCookieValue(browserSession,cookieName)
+    				log.debug("state variable ${name} set to ${browserSession.state[name]} from cookie")
+    			} else if(pattern.startsWith('json:')) {
+    				def jsonPath = pattern.minus('json:')
+    				browserSession.state[name] = getJsonValue(html, browserSession,jsonPath)
+    				log.debug("state variable ${name} set to ${browserSession.state[name]} from json")
+    			} else {
+		    		def parts = pattern.tokenize('.')
+		    		browserSession.state[name] = parts.size() == 2 ? getIdAttr(html, parts[0], parts[1]) : null
+    				log.debug("state variable ${name} set to ${browserSession.state[name]} from html parse with pattern ${pattern}")
+		    	}
 		    } 
     	}
 	}
@@ -218,19 +302,21 @@ private def extractSession(params, response, browserSession) {
     }
         
     visitNodes(html[0]) {
-    	if(it instanceof groovy.util.slurpersupport.Node && it.name == 'INPUT') {
+    	if(it instanceof groovy.util.slurpersupport.Node) {
+    		if(it.name == 'INPUT') {
         	def attr = it.attributes()
             if(attr) {
             	def name = attr['name']
                 if(name) {
 					def value = attr['value'] ? attr['value'] : ''
-					if(browserSession.vars.containsKey(name)) {
-						browserSession.vars[name] = value
-						//log.debug "found form value ${value} for ${name}"
+						if(browserSession.vars.containsKey(name)) {
+							browserSession.vars[name] = value
+							//log.debug "found form value ${value} for ${name}"
+						}
 					}
-				}
-            }
-        }
+           		}
+        	}
+    	}
         return false
     }
     
@@ -243,38 +329,47 @@ private def fillTemplate(template, map) {
 	return result
 }
 
-private def navigateUrl(recipe, browserSession) {
-    def params = recipe.pop()
+private def navigateUrl(recipes, browserSession) {
+	if(!recipes.size()) return
+
+    def params = recipes.pop()
+    log.debug("processing recipe ${params.name}")
 
 	def success = { response ->
-    	log.trace("response status is ${response.status}")
+    	log.trace("response status is ${response.status} for ${params.name} and uri:${params.uri}")
 
     	browserSession.cookies = !browserSession.get('cookies') ? [] : browserSession.cookies
     	response.headerIterator('Set-Cookie').each {
-    		log.debug "adding cookie to request: ${it}"
+    		//log.debug "adding cookie to cookie jar: ${it}"
       		browserSession.cookies.add(it.value.split(';')[0])
     	}
+		extractSession(params, response, browserSession)
+	    if(params.processor) params.processor(response, browserSession)
 
     	if(response.status == 200) {
-			extractSession(params, response, browserSession)
-	    	if(params.processor) params.processor(response, browserSession)
+    		def text = "${response.data}"
+    		browserSession.completedUrl = params.uri
 	    	if(params.expect) {
-	    		log.debug((response.data =~ params.expect) ? "${params.name} is successful" : "${params.name} has failed")
+	    		if(params.expect.content) {
+	    			log.debug((text =~ params.expect.content) ? "${params.name} is successful by content" : "${params.name} has failed by content")
+	    		} else if(params.expect.location) {
+	    			log.debug((browserSession.completedUrl =~ params.expect.location) ? "${params.name} is successful by location" : "${params.name} has failed by location at ${browserSession.completedUrl} - expecting ${params.expect.location}")
+				}
 	    	}
-	    } else if(response.status == 302) {
+	    } else if(response.status == 302 && !params.nofollow) {
 	    	response.headerIterator('Location').each {
     			def location = params.uri.toURI().resolve(it.value).toString()
     			log.debug "redirecting on 302 to: ${location}"
-    			recipe.push(['name': "${params.name} redirect", 'uri': location, 'expect': params.expect, 'processor': params.processor, 'state': params.state])
+    			recipes.push(['name': "${params.name} redirect", 'uri': location, 'expect': params.expect, 'processor': params.processor, 'state': params.state])
     		}
 	    }
 
-		if(recipe) {
-			if(!recipe[-1].referer) recipe[-1].referer = params.uri
-			navigateUrl(recipe, browserSession)
+		if(recipes) {
+			if(!recipes[-1].referer) recipes[-1].referer = params.uri
+			navigateUrl(recipes, browserSession)
 		}
 
-	    return browserSession
+	    //return browserSession
     }
 
 	if(params.uri) {
@@ -283,11 +378,11 @@ private def navigateUrl(recipe, browserSession) {
         if(!params.headers) params.headers = [:]
 		if(!params.headers['Origin']) params.headers['Host'] = params.uri.toURI().host
 		params.headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.110 Safari/537.36'
-		params.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+		if(!params.contentType) params.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 		params.headers['Accept-Language'] = 'en-US,en;q=0.5'
 
-		if(params.referer == 'self') params.referer = params.uri
-		if(params.referer) params.headers['Referer'] = params.referer
+		//if(params.referer == 'self') params.referer = params.uri
+		//if(params.referer) params.headers['Referer'] = params.referer
 		if(browserSession.cookies) {
 			params.headers['Cookie'] = browserSession.cookies.join(";")
 		}
@@ -297,13 +392,25 @@ private def navigateUrl(recipe, browserSession) {
 				if(!value && browserSession.vars[name]) params.variables[name] = browserSession.vars[name]
 			}
 		}
-		log.debug("navigating to ${params.uri} and method: ${params.method} and headers ${params.headers} and using params: ${params.variables}")
+        params.headers.each {name, value ->
+        	params.headers[name] = fillTemplate(value, browserSession.vars + browserSession.state)
+        }
 		try {
-			if(params.method == 'post' && params.variables) {
-				params.body = toQueryString(params.variables)
+			log.debug("navigation:${params}")
+			if(!params.method) params.method = 'get'
+			log.debug("navigation::${params.method} ${params.uri}")
+			//params.headers.each{key, value ->
+			//	log.debug("header:${params.uri}::${key}:${value}")
+			//}
+			if(params.method == 'post' && (params.variables || params.body)) {				
+				if(params.variables) {
+					params.body = toQueryString(params.variables)
+				}
+				//log.debug("postbody:${params.uri}::${params.body}")
 				httpPost(params, success)
 			} else {
 				if(params.variables) params.query = params.variables
+				//log.debug("getquery:${params.uri}::${params.query}")
 	    		httpGet(params,success)
    			}
 		} catch (e) {

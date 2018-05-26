@@ -38,81 +38,51 @@ preferences {
         }
    
 	}
- section("Indicator Light (optional)") {
-		input "switches", "capability.switch", required: false, multiple: false, title: "Which lights?"
-	}
 }
 
 def installed() {
 	log.debug "Installed with settings: ${settings}"
 	subscribe(lock1, "lock", doorUnlockedHandler, [filterEvents: false])
-    state.currentState = "off"
 }
 
 def updated() {
 	log.debug "Updated with settings: ${settings}"
-
 	unsubscribe()
 	subscribe(lock1, "lock", doorUnlockedHandler, [filterEvents: false])
 }
 
 def lockDoor() {                                                // This process locks the door.
                lock1.lock()                                     // Don't need delay because the process is scheduled to run later
-               log.debug "in the lockDoor routine Switch is ${state.currentState}"
-               if (switches && "off" == state.currentState) {
-               
-						switches.off()
-	   } 
-        if (location.contactBookEnabled) {
-                    sendNotificationToContacts("Front door locked", recipients)
-        }
-        else {
-            if (phone) {
-                        sendSms phone, "Front door locked"
-                    } else {
-                        sendPush "Front door locked"
-                    }
-
-                }
-               
-
 }
 
 def doorUnlockedHandler(evt) {
-		
-        if (switches) {
-        	
-        	log.debug "Debug statement - Lock ${lock1} was: ${evt.value}"
-		}
+
         if (evt.value == "lock") {                      // If the human locks the door then...
                         unschedule(lockDoor)                	// ...we don't need to lock it later. 	
         }                
 		
         if (evt.value == "unlocked") {                  		// If the human (or computer) unlocks the door then...
         	        log.debug "Locking in ${minutesLater} minutes"
-                if (switches) {
-                		state.currentState = switches.currentSwitch
-                        log.debug "Switch was ${state.currentState}"
-						switches.on()
-	   			}
-                 if (location.contactBookEnabled) {
-                    sendNotificationToContacts("Front door unlocked", recipients)
-        }
-        else {
-            if (phone) {
+                 if (phone) {
                         sendSms phone, "Front door unlocked"
                     } else {
-                        sendPush "Front door unlocked"
+                        if (location.mode == "Away"){
+							sendPush "Front door unlocked"
+                        }
                     }
-
-                }
-		        def delay = minutesLater * 60          		   // runIn uses seconds so we don't need to multiple by 1000
+        }
+        		 def delay = minutesLater * 60          		   // runIn uses seconds so we don't need to multiple by 1000
                         runIn(delay, lockDoor)                 // ...schedule the door lock procedure to run x minutes later.
-                }
 
-       
+
+        if (evt.value == "locked") {                      // If the human locks the door then...
+                         if (phone) {
+                        sendSms phone, "Front door locked"
+                    } else {
+                        if (location.mode != "Away"){
+								sendPush "Front door locked"
+                        }
+                    }
+        }   
                 
-
-
-
-}
+                	}
