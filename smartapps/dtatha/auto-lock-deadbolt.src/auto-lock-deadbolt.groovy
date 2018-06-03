@@ -32,12 +32,6 @@ preferences {
 	section("Lock it how many minutes later?") {
 		input "minutesLater", "number", title: "When?"
 	}
-    section("Via this number (optional, sends push notification if not specified)"){
-        input("recipients", "contact", title: "Send notifications to") {
-            input "phone", "phone", title: "Phone Number", required: false
-        }
-   
-	}
 }
 
 def installed() {
@@ -56,33 +50,20 @@ def lockDoor() {                                                // This process 
 }
 
 def doorUnlockedHandler(evt) {
-
+//if locked, unschedule locking
+//if unlocked, schedule locking
         if (evt.value == "lock") {                      // If the human locks the door then...
-                        unschedule(lockDoor)                	// ...we don't need to lock it later. 	
-        }                
-		
-        if (evt.value == "unlocked") {                  		// If the human (or computer) unlocks the door then...
-        	        log.debug "Locking in ${minutesLater} minutes"
-                 if (phone) {
-                        sendSms phone, "Front door unlocked"
-                    } else {
-                        if (location.mode == "Away"){
-							sendPush "Front door unlocked"
-                        }
-                    }
+                unschedule(lockDoor)                	// ...we don't need to lock it later. 	
         }
-        		 def delay = minutesLater * 60          		   // runIn uses seconds so we don't need to multiple by 1000
-                        runIn(delay, lockDoor)                 // ...schedule the door lock procedure to run x minutes later.
-
-
-        if (evt.value == "locked") {                      // If the human locks the door then...
-                         if (phone) {
-                        sendSms phone, "Front door locked"
-                    } else {
-                        if (location.mode != "Away"){
-								sendPush "Front door locked"
-                        }
-                    }
+        else {
+         		runIn(minutesLater * 60, lockDoor)                 // ...schedule the door lock procedure to run x minutes later.
+		}
+//Notification management
+		if (evt.value == "unlocked" && location.mode == "Away") {                  		// If the human (or computer) unlocks the door then...
+				sendPush "Front door unlocked"
+        }
+        if (evt.value == "locked" && location.mode != "Away") {                      // If the human locks the door then...
+                        sendPush "Front door locked"
         }   
                 
-                	}
+}

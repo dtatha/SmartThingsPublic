@@ -38,6 +38,9 @@ preferences() {
 	section("Optionally choose temperature sensor to use instead of the thermostat's... ") {
 		input "sensor", "capability.temperatureMeasurement", title: "Temp Sensors", required: true
 	}
+    section("Outdoor Temperature... ") {
+		input "sensorOAT", "capability.temperatureMeasurement", title: "Outdoor Air Temperature", required: true
+	}
     section("Select the ceiling fan control hardware..."){
 			input "fanDimmer", "capability.switchLevel", 
 	    	multiple:false, title: "Fan Control device", required: false
@@ -111,7 +114,9 @@ private evaluate()
 		def tm = thermostat.currentThermostatMode
 		def ct = thermostat.currentTemperature
 		def currentTemp = sensor.currentTemperature
+        def OAT = sensorOAT.currentTemperature
         def offset=0
+        def controlPoint=0
         def between = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
     	def adaptiveFan = adapFanSwitch.currentSwitch
         def sleepBetween = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
@@ -129,9 +134,10 @@ private evaluate()
             	log.trace("Offset $offset °F")
             }
            */
+           controlPoint=coolingSetpoint+0.4*max(0,min(82,OAT)-72)
             if (currentTemp - (coolingSetpoint+offset) >= threshold) {
         		thermostat.setCoolingSetpoint(68)
-            	log.trace("AC turned ON - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
+            	log.trace("AC turned ON - Control Point $controlPoint °F Current Temperature  $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
                 if ((!(thermostat.thermostatOperatingState in ["cooling"])) && sendPush){
                 	sendNotificationEvent("RemoStat - AC turned ON . Current Temperature $currentTemp °F")
                 }
@@ -139,7 +145,7 @@ private evaluate()
         	}
         	else {
         		thermostat.setCoolingSetpoint(84)
-            	log.trace("AC turned OFF -  - Current Temperature $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
+            	log.trace("AC turned OFF - Control Point $controlPoint °F Current Temperature  $currentTemp °F, Setpoint $heatingSetpoint °F, Offset $offset °F")
                 if (thermostat.thermostatOperatingState in ["cooling"] && sendPush){
                 	sendNotificationEvent("RemoStat - AC turned OFF . Current Temperature $currentTemp  °F")
              	}
